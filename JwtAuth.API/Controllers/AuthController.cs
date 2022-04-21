@@ -1,10 +1,5 @@
-﻿using JwtAuth.API.Models;
-using Microsoft.AspNetCore.Http;
+﻿using JwtAuth.Models;
 using Microsoft.AspNetCore.Mvc;
-using Microsoft.IdentityModel.Tokens;
-using System.IdentityModel.Tokens.Jwt;
-using System.Security.Claims;
-using System.Security.Cryptography;
 
 namespace JwtAuth.API.Controllers
 {
@@ -13,72 +8,44 @@ namespace JwtAuth.API.Controllers
     public class AuthController : ControllerBase
     {
         private readonly IConfiguration _configuration;
-        private readonly string _token;
-        public static User user = new User();
+        private readonly IAuthService _authService;
 
-        public AuthController(IConfiguration configuration)
+        public AuthController(IConfiguration configuration, IAuthService authService)
         {
             _configuration = configuration;
-            _token = configuration.GetSection("Keys:TokenSecret").Value;
+            _authService = authService;
+        }
+
+        [HttpGet("/getall")]
+        public async Task<ActionResult> GetAllUsers()
+        {
+            var res = await _authService.GetAll();
+            return Ok(res);
         }
 
         [HttpPost("register")]
-        public async Task<ActionResult<User>> Register(UserDTO request)
+        public async Task<ActionResult<UserDTO>> Register(UserDTO request)
         {
-            CreateHash(request.password, out byte[] passwordHash, out byte[] passwordSalt);
-            user.PasswordHash = passwordHash;
-            user.PasswordSalt = passwordSalt;
-            user.Username = request.username;
-            return Ok(user);
+            if (!ModelState.IsValid)
+            {
+                return BadRequest(ModelState);
+            }
+
+            var res = await _authService.CreateUser(request);
+            return Ok(res);
         }
 
         [HttpPost("login")]
         public async Task<ActionResult<string>> Login(UserDTO request)
         {
-            if (request.username != user.Username)
-                return BadRequest("User not found");
-
-            if (!VerifyHash(request.password, user.PasswordHash, user.PasswordSalt))
-                return BadRequest("Invalid password");
-
-            var token = GenerateToken(user);
-            return Ok(token);
-        }
-
-        private void CreateHash(string password, out byte[] passwordHash, out byte[] passwordSalt) {
-            using (var hmac = new HMACSHA512())
+            if (!ModelState.IsValid)
             {
-                passwordSalt = hmac.Key;
-                passwordHash = hmac.ComputeHash(System.Text.Encoding.UTF8.GetBytes(password));
+                return BadRequest(ModelState);
             }
+
+            var res = await _authService.LoginUser(request.username, request.password);
+            return Ok(res);
         }
 
-        private bool VerifyHash(string password, byte[] passwordHash, byte[] passwordSalt)
-        {
-            using(var hmac = new HMACSHA512(passwordSalt))
-            {
-                var hsh = hmac.ComputeHash(System.Text.Encoding.UTF8.GetBytes(password));
-                return passwordHash.SequenceEqual(hsh);
-            }
-        }
-
-        private string GenerateToken(User user)
-        {
-            List<Claim> claims = new List<Claim>
-            {
-                new Claim(ClaimTypes.Name, user.Username),
-                new Claim(ClaimTypes.Role, "Admin")
-            };
-
-            var key = new SymmetricSecurityKey(System.Text.Encoding.UTF8.GetBytes(_token));
-            var creds = new SigningCredentials(key, SecurityAlgorithms.HmacSha512Signature);
-            var token = new JwtSecurityToken(
-                claims: claims,
-                expires: DateTime.Now.AddHours(1),
-                signingCredentials: creds);
-
-            var jwt = new JwtSecurityTokenHandler().WriteToken(token);
-            return jwt;
-        }
     }
 }
